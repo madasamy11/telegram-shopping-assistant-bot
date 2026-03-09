@@ -11,6 +11,10 @@ const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, {
 const userDailyUsage = new Map();
 const userLastRequest = new Map();
 
+const MAX_QUERY_LENGTH = 30;
+const DAILY_REQUEST_LIMIT = 50;
+const RATE_LIMIT_MS = 5000;
+
 const SHOPPING_DOMAINS = [
   "amazon.in",
   "flipkart.com",
@@ -52,30 +56,29 @@ bot.onText(/\/start/, (msg) => {
 
 function checkQueryValidationAndRateLimiting(msg) {
   const userId = msg.from.id;
-  const query = msg.text;
+  const query = msg.text?.trim();
 
   // 1. Query Length Validation
-  if (query.length > 30) {
-    return `❌ Query too long.\n\nPlease keep your search under 30 characters.\nExample: "iphone 15"`;
+  if (query.length > MAX_QUERY_LENGTH) {
+    return `❌ Query too long.\n\nPlease keep your search under ${MAX_QUERY_LENGTH} characters.\nExample: "iphone 15"`;
   }
 
   // 2. Block URLs in Queries
-  const urlPattern = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/i;
+  const urlPattern = /(https?:\/\/|www\.|\.com|\.in|\.net)/i;
   if (urlPattern.test(query)) {
     return `❌ URLs are not allowed in search queries.\n\nPlease send only a product name.\nExample: "sony headphones"`;
   }
 
-  // 3. Short-Term Rate Limiting (5 seconds)
+  // 3. Short-Term Rate Limiting
   const now = Date.now();
   if (userLastRequest.has(userId)) {
     const lastRequestTime = userLastRequest.get(userId);
-    if (now - lastRequestTime < 5000) {
+    if (now - lastRequestTime < RATE_LIMIT_MS) {
       return `⏳ You're sending requests too quickly.\n\nPlease wait a few seconds before trying again.`;
     }
   }
-  userLastRequest.set(userId, now);
 
-  // 4. Daily Request Limit (50 searches per day)
+  // 4. Daily Request Limit
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format based on UTC
 
   if (!userDailyUsage.has(userId)) {
@@ -87,8 +90,8 @@ function checkQueryValidationAndRateLimiting(msg) {
       usage.count = 1;
       usage.date = today;
     } else {
-      if (usage.count >= 50) {
-        return `⚠️ Daily request limit reached.\n\nYou can send up to 50 searches per day.\nPlease try again tomorrow.`;
+      if (usage.count >= DAILY_REQUEST_LIMIT) {
+        return `⚠️ Daily request limit reached.\n\nYou can send up to ${DAILY_REQUEST_LIMIT} searches per day.\nPlease try again tomorrow.`;
       }
       usage.count += 1;
     }
@@ -101,15 +104,21 @@ function checkQueryValidationAndRateLimiting(msg) {
 bot.on("message", async (msg) => {
 
   const chatId = msg.chat.id;
-  const query = msg.text;
+  const query = msg.text?.trim();
 
-  if (!query || query.startsWith("/")) return;
+  if (!query) {
+    bot.sendMessage(chatId, "Please send a product name to search.");
+    return;
+  }
+  if (query.startsWith("/")) return;
 
   const validationError = checkQueryValidationAndRateLimiting(msg);
   if (validationError) {
     bot.sendMessage(chatId, validationError);
     return;
   }
+
+  userLastRequest.set(msg.from.id, Date.now());
 
   try {
     // Show typing indicator
@@ -124,7 +133,7 @@ bot.on("message", async (msg) => {
       return;
     }
 
-    const topResults = results.slice(0,5);
+    const topResults = results.slice(0, Math.min(5, results.length));
 
     let message = `🛒 Top shopping links for "${query}"\n\n`;
 
