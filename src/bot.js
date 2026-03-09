@@ -8,6 +8,9 @@ const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, {
   polling: true
 });
 
+const userDailyUsage = new Map();
+const userLastRequest = new Map();
+
 const SHOPPING_DOMAINS = [
   "amazon.in",
   "flipkart.com",
@@ -47,12 +50,66 @@ bot.onText(/\/start/, (msg) => {
 
 });
 
+function checkQueryValidationAndRateLimiting(msg) {
+  const userId = msg.from.id;
+  const query = msg.text;
+
+  // 1. Query Length Validation
+  if (query.length > 30) {
+    return `❌ Query too long.\n\nPlease keep your search under 30 characters.\nExample: "iphone 15"`;
+  }
+
+  // 2. Block URLs in Queries
+  const urlPattern = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/i;
+  if (urlPattern.test(query)) {
+    return `❌ URLs are not allowed in search queries.\n\nPlease send only a product name.\nExample: "sony headphones"`;
+  }
+
+  // 3. Short-Term Rate Limiting (5 seconds)
+  const now = Date.now();
+  if (userLastRequest.has(userId)) {
+    const lastRequestTime = userLastRequest.get(userId);
+    if (now - lastRequestTime < 5000) {
+      return `⏳ You're sending requests too quickly.\n\nPlease wait a few seconds before trying again.`;
+    }
+  }
+  userLastRequest.set(userId, now);
+
+  // 4. Daily Request Limit (50 searches per day)
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format based on UTC
+
+  if (!userDailyUsage.has(userId)) {
+    userDailyUsage.set(userId, { count: 1, date: today });
+  } else {
+    const usage = userDailyUsage.get(userId);
+    if (usage.date !== today) {
+      // Reset for a new day
+      usage.count = 1;
+      usage.date = today;
+    } else {
+      if (usage.count >= 50) {
+        return `⚠️ Daily request limit reached.\n\nYou can send up to 50 searches per day.\nPlease try again tomorrow.`;
+      }
+      usage.count += 1;
+    }
+    userDailyUsage.set(userId, usage);
+  }
+
+  return null; // All checks passed
+}
+
 bot.on("message", async (msg) => {
 
   const chatId = msg.chat.id;
   const query = msg.text;
 
   if (!query || query.startsWith("/")) return;
+
+  const validationError = checkQueryValidationAndRateLimiting(msg);
+  if (validationError) {
+    bot.sendMessage(chatId, validationError);
+    return;
+  }
 
   try {
     // Show typing indicator
