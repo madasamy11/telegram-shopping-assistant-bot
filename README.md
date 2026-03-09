@@ -19,7 +19,7 @@ A Telegram bot that searches top e-commerce sites (like Amazon, Flipkart, Croma,
 1. **Clone the repository:**
    \`\`\`bash
    git clone <repository-url>
-   cd telegram-product-bot
+   cd telegram-shopping-assistant-bot
    \`\`\`
 
 2. **Install dependencies:**
